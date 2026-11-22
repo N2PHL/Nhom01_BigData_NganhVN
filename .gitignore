@@ -1,0 +1,11 @@
+data/raw/
+data/silver/
+data/gold/parquet/
+__pycache__/
+.pytest_cache/
+.venv/
+.Rhistory
+.DS_Store
+spark-warehouse/
+metastore_db/
+derby.log

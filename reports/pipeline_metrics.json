@@ -1,0 +1,167 @@
+{
+  "stages": {
+    "1b_market_index": {
+      "rows": 2708
+    },
+    "1_read_bronze": {
+      "rows": 196693,
+      "files": 803,
+      "tickers": 81,
+      "date_range": "2017-01-03..2026-11-20"
+    },
+    "2_dedup_window_universe": {
+      "rows": 196609
+    },
+    "3_silver_panel": {
+      "rows": 196609,
+      "tickers": 81,
+      "sectors": 11,
+      "rows_valid_return": 196518
+    },
+    "4_gold_tables": {
+      "ticker_kpi": 81,
+      "sector_daily": 27142,
+      "market_daily": 2433,
+      "sector_kpi": 12,
+      "sector_yearly": 110,
+      "sector_regime": 22,
+      "liquidity_quarterly": 440,
+      "sector_corr": 121,
+      "ticker_monthly": 9498,
+      "abnormal_events": 272,
+      "data_quality_report": 14
+    }
+  },
+  "spark_version": "4.0.5",
+  "period": "2017-01-01..2026-11-22",
+  "rf_annual": 0.03,
+  "data_quality": [
+    {
+      "check_id": "DQ-01",
+      "nhom": "Missing",
+      "quy_tac": "Thiếu thời gian hoặc giá OHLC",
+      "so_vi_pham": 0,
+      "tren_tong": 196693,
+      "ty_le_pct": 0.0,
+      "xu_ly": "Loại bỏ dòng (không nội suy giá vì sẽ tạo giao dịch không có thật)"
+    },
+    {
+      "check_id": "DQ-02",
+      "nhom": "Missing",
+      "quy_tac": "Thiếu khối lượng",
+      "so_vi_pham": 0,
+      "tren_tong": 196693,
+      "ty_le_pct": 0.0,
+      "xu_ly": "Điền 0 và gắn cờ volume_missing"
+    },
+    {
+      "check_id": "DQ-03",
+      "nhom": "Duplicate",
+      "quy_tac": "Trùng khóa (ticker, date)",
+      "so_vi_pham": 84,
+      "tren_tong": 196693,
+      "ty_le_pct": 0.0427,
+      "xu_ly": "Giữ bản lấy muộn nhất (row_number); 79 khóa có giá đóng cửa khác nhau giữa các bản"
+    },
+    {
+      "check_id": "DQ-04",
+      "nhom": "Validity",
+      "quy_tac": "Ngoài giai đoạn 2017-01-01..2026-11-22",
+      "so_vi_pham": 0,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.0,
+      "xu_ly": "Lọc bỏ (filter)"
+    },
+    {
+      "check_id": "DQ-05",
+      "nhom": "Integration",
+      "quy_tac": "Mã không khớp danh mục ngành (thừa / thiếu dữ liệu)",
+      "so_vi_pham": 0,
+      "tren_tong": 81,
+      "ty_le_pct": 0.0,
+      "xu_ly": "Inner join với universe; thiếu dữ liệu: không có"
+    },
+    {
+      "check_id": "DQ-06",
+      "nhom": "Validity",
+      "quy_tac": "Giá <= 0 hoặc High < Low",
+      "so_vi_pham": 0,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.0,
+      "xu_ly": "Loại bỏ dòng"
+    },
+    {
+      "check_id": "DQ-07",
+      "nhom": "Consistency",
+      "quy_tac": "Open/Close nằm ngoài [Low, High]",
+      "so_vi_pham": 93,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.0473,
+      "xu_ly": "High = max(O,H,C), Low = min(O,L,C)"
+    },
+    {
+      "check_id": "DQ-08",
+      "nhom": "Validity",
+      "quy_tac": "Phiên khối lượng = 0 (không khớp lệnh)",
+      "so_vi_pham": 287,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.146,
+      "xu_ly": "Giữ dòng, gắn cờ is_no_trade (không dùng tính thanh khoản trung bình)"
+    },
+    {
+      "check_id": "DQ-09a",
+      "nhom": "Outlier",
+      "quy_tac": "|Lợi suất ngày| vượt biên độ sàn hiện tại (HOSE 7%, HNX 10%) + 0,5%",
+      "so_vi_pham": 268,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.1363,
+      "xu_ly": "Chỉ gắn cờ is_band_breach, VẪN tính lợi suất (thường là giai đoạn mã còn niêm yết UPCoM/HNX)"
+    },
+    {
+      "check_id": "DQ-09b",
+      "nhom": "Outlier",
+      "quy_tac": "|Lợi suất ngày| > 15.5% (vượt biên độ rộng nhất phiên thường)",
+      "so_vi_pham": 6,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.0031,
+      "xu_ly": "Giữ giá gốc, ret_clean = NULL (phiên chào sàn/chuyển sàn hoặc lỗi giá); liệt kê trong abnormal_events"
+    },
+    {
+      "check_id": "DQ-10",
+      "nhom": "Time",
+      "quy_tac": "Khoảng trống > 10 ngày giữa 2 phiên (tạm ngừng giao dịch)",
+      "so_vi_pham": 4,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.002,
+      "xu_ly": "ret_clean = NULL cho phiên mở lại"
+    },
+    {
+      "check_id": "DQ-11",
+      "nhom": "Outlier",
+      "quy_tac": "Khối lượng đột biến |z60| > 4.0",
+      "so_vi_pham": 594,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.3021,
+      "xu_ly": "Giữ dòng, gắn cờ (thông tin cho EDA dòng tiền)"
+    },
+    {
+      "check_id": "DQ-12",
+      "nhom": "Time",
+      "quy_tac": "Phiên thiếu của từng mã so với lịch giao dịch chung (trong khoảng niêm yết của mã)",
+      "so_vi_pham": 282,
+      "tren_tong": 196609,
+      "ty_le_pct": 0.1434,
+      "xu_ly": "Không tạo dòng giả; lợi suất tính giữa 2 phiên có thật. 0 dòng ở ngày có < 10 mã giao dịch"
+    },
+    {
+      "check_id": "DQ-13",
+      "nhom": "Integration",
+      "quy_tac": "Ngày giao dịch không có dữ liệu VN-Index từ nguồn DNSE",
+      "so_vi_pham": 35,
+      "tren_tong": 2468,
+      "ty_le_pct": 1.4182,
+      "xu_ly": "Không nội suy chỉ số; các ngày này không tính beta/capture/chế độ thị trường; CAGR tính theo năm lịch"
+    }
+  ],
+  "elapsed_seconds": 205.2
+}

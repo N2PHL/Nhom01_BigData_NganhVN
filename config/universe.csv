@@ -1,0 +1,82 @@
+ticker,company_name,exchange,icb2_code,sector_code,sector_name
+VCB,Vietcombank,HOSE,8300,BANK,Ngân hàng
+BID,BIDV,HOSE,8300,BANK,Ngân hàng
+CTG,VietinBank,HOSE,8300,BANK,Ngân hàng
+TCB,Techcombank,HOSE,8300,BANK,Ngân hàng
+MBB,MB Bank,HOSE,8300,BANK,Ngân hàng
+ACB,Ngân hàng Á Châu,HOSE,8300,BANK,Ngân hàng
+VPB,VPBank,HOSE,8300,BANK,Ngân hàng
+STB,Sacombank,HOSE,8300,BANK,Ngân hàng
+SSI,Chứng khoán SSI,HOSE,8700,FINSVC,Dịch vụ tài chính
+VND,Chứng khoán VNDIRECT,HOSE,8700,FINSVC,Dịch vụ tài chính
+HCM,Chứng khoán HSC,HOSE,8700,FINSVC,Dịch vụ tài chính
+VCI,Chứng khoán Vietcap,HOSE,8700,FINSVC,Dịch vụ tài chính
+SHS,Chứng khoán Sài Gòn - Hà Nội,HNX,8700,FINSVC,Dịch vụ tài chính
+BSI,Chứng khoán BIDV,HOSE,8700,FINSVC,Dịch vụ tài chính
+CTS,Chứng khoán VietinBank,HOSE,8700,FINSVC,Dịch vụ tài chính
+VIC,Vingroup,HOSE,8600,REALEST,Bất động sản
+VHM,Vinhomes,HOSE,8600,REALEST,Bất động sản
+NVL,Novaland,HOSE,8600,REALEST,Bất động sản
+KDH,Nhà Khang Điền,HOSE,8600,REALEST,Bất động sản
+DXG,Tập đoàn Đất Xanh,HOSE,8600,REALEST,Bất động sản
+NLG,Đầu tư Nam Long,HOSE,8600,REALEST,Bất động sản
+PDR,Phát triển BĐS Phát Đạt,HOSE,8600,REALEST,Bất động sản
+DIG,Tổng CT Đầu tư PT Xây dựng (DIC),HOSE,8600,REALEST,Bất động sản
+VCG,Vinaconex,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+CTD,Coteccons,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+CII,Hạ tầng Kỹ thuật TP.HCM,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+HT1,Xi măng Vicem Hà Tiên,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+BMP,Nhựa Bình Minh,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+PC1,Tập đoàn PC1,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+FCN,Fecon,HOSE,2300,CONSTR,Xây dựng & Vật liệu
+HPG,Tập đoàn Hòa Phát,HOSE,1700,BASICRES,Tài nguyên cơ bản
+HSG,Tập đoàn Hoa Sen,HOSE,1700,BASICRES,Tài nguyên cơ bản
+NKG,Thép Nam Kim,HOSE,1700,BASICRES,Tài nguyên cơ bản
+SMC,Đầu tư Thương mại SMC,HOSE,1700,BASICRES,Tài nguyên cơ bản
+TLH,Thép Tiến Lên,HOSE,1700,BASICRES,Tài nguyên cơ bản
+KSB,Khoáng sản & XD Bình Dương,HOSE,1700,BASICRES,Tài nguyên cơ bản
+DHC,Đông Hải Bến Tre,HOSE,1700,BASICRES,Tài nguyên cơ bản
+DGC,Hóa chất Đức Giang,HOSE,1300,CHEM,Hóa chất
+DPM,Đạm Phú Mỹ,HOSE,1300,CHEM,Hóa chất
+DCM,Đạm Cà Mau,HOSE,1300,CHEM,Hóa chất
+CSV,Hóa chất Cơ bản Miền Nam,HOSE,1300,CHEM,Hóa chất
+LAS,Supe Phốt phát Lâm Thao,HNX,1300,CHEM,Hóa chất
+BFC,Phân bón Bình Điền,HOSE,1300,CHEM,Hóa chất
+PHR,Cao su Phước Hòa,HOSE,1300,CHEM,Hóa chất
+VNM,Vinamilk,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+MSN,Tập đoàn Masan,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+SAB,Sabeco,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+KDC,Tập đoàn KIDO,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+VHC,Vĩnh Hoàn,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+ANV,Nam Việt,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+DBC,Tập đoàn Dabaco,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+SBT,Thành Thành Công - Biên Hòa,HOSE,3500,FOODBEV,Thực phẩm & Đồ uống
+MWG,Thế Giới Di Động,HOSE,5300,RETAIL,Bán lẻ
+PNJ,Vàng bạc Đá quý Phú Nhuận,HOSE,5300,RETAIL,Bán lẻ
+FRT,FPT Retail,HOSE,5300,RETAIL,Bán lẻ
+DGW,Thế Giới Số (Digiworld),HOSE,5300,RETAIL,Bán lẻ
+PET,Petrosetco,HOSE,5300,RETAIL,Bán lẻ
+AST,Taseco Airs,HOSE,5300,RETAIL,Bán lẻ
+HAX,Ô tô Hàng Xanh (Haxaco),HOSE,5300,RETAIL,Bán lẻ
+PVD,Khoan Dầu khí PV Drilling,HOSE,0500,OILGAS,Dầu khí
+PVS,Dịch vụ Kỹ thuật Dầu khí PTSC,HNX,0500,OILGAS,Dầu khí
+PLX,Petrolimex,HOSE,0500,OILGAS,Dầu khí
+BSR,Lọc hóa dầu Bình Sơn,HOSE,0500,OILGAS,Dầu khí
+PVC,Hóa chất & DV Dầu khí PVChem,HNX,0500,OILGAS,Dầu khí
+PVB,Bọc ống Dầu khí,HNX,0500,OILGAS,Dầu khí
+GAS,PV GAS,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+POW,PV Power,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+NT2,Điện lực Dầu khí Nhơn Trạch 2,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+PPC,Nhiệt điện Phả Lại,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+GEG,Điện Gia Lai,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+BWE,Nước - Môi trường Bình Dương,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+TDM,Nước Thủ Dầu Một,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+VSH,Thủy điện Vĩnh Sơn - Sông Hinh,HOSE,7500,UTIL,"Điện, nước & xăng dầu khí đốt"
+GMD,Gemadept,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+HAH,Vận tải & Xếp dỡ Hải An,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+VSC,Container Việt Nam (Viconship),HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+PVT,Vận tải Dầu khí PV Trans,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+VJC,Vietjet Air,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+SCS,Dịch vụ Hàng hóa Sài Gòn,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+VTP,Viettel Post,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp
+GEX,Tập đoàn GELEX,HOSE,2700,INDSVC,Hàng & Dịch vụ công nghiệp

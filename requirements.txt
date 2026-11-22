@@ -1,0 +1,10 @@
+# Python 3.10–3.12 khuyến nghị · Java 17 (chạy được cả PySpark 3.5 và 4.x)
+pyspark>=3.5,<5
+pandas>=2.0
+numpy>=1.24
+pyarrow>=14
+requests>=2.31
+streamlit>=1.50
+plotly>=5.20
+setuptools        # PySpark 3.5 cần 'distutils' khi toPandas(); Python 3.12+ đã bỏ distutils
+pytest>=8

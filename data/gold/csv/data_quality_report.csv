@@ -1,0 +1,15 @@
+﻿check_id,nhom,quy_tac,so_vi_pham,tren_tong,ty_le_pct,xu_ly
+DQ-01,Missing,Thiếu thời gian hoặc giá OHLC,0,196693,0.0,Loại bỏ dòng (không nội suy giá vì sẽ tạo giao dịch không có thật)
+DQ-02,Missing,Thiếu khối lượng,0,196693,0.0,Điền 0 và gắn cờ volume_missing
+DQ-03,Duplicate,"Trùng khóa (ticker, date)",84,196693,0.0427,Giữ bản lấy muộn nhất (row_number); 79 khóa có giá đóng cửa khác nhau giữa các bản
+DQ-04,Validity,Ngoài giai đoạn 2017-01-01..2026-11-22,0,196609,0.0,Lọc bỏ (filter)
+DQ-05,Integration,Mã không khớp danh mục ngành (thừa / thiếu dữ liệu),0,81,0.0,Inner join với universe; thiếu dữ liệu: không có
+DQ-06,Validity,Giá <= 0 hoặc High < Low,0,196609,0.0,Loại bỏ dòng
+DQ-07,Consistency,"Open/Close nằm ngoài [Low, High]",93,196609,0.0473,"High = max(O,H,C), Low = min(O,L,C)"
+DQ-08,Validity,Phiên khối lượng = 0 (không khớp lệnh),287,196609,0.146,"Giữ dòng, gắn cờ is_no_trade (không dùng tính thanh khoản trung bình)"
+DQ-09a,Outlier,"|Lợi suất ngày| vượt biên độ sàn hiện tại (HOSE 7%, HNX 10%) + 0,5%",268,196609,0.1363,"Chỉ gắn cờ is_band_breach, VẪN tính lợi suất (thường là giai đoạn mã còn niêm yết UPCoM/HNX)"
+DQ-09b,Outlier,|Lợi suất ngày| > 15.5% (vượt biên độ rộng nhất phiên thường),6,196609,0.0031,"Giữ giá gốc, ret_clean = NULL (phiên chào sàn/chuyển sàn hoặc lỗi giá); liệt kê trong abnormal_events"
+DQ-10,Time,Khoảng trống > 10 ngày giữa 2 phiên (tạm ngừng giao dịch),4,196609,0.002,ret_clean = NULL cho phiên mở lại
+DQ-11,Outlier,Khối lượng đột biến |z60| > 4.0,594,196609,0.3021,"Giữ dòng, gắn cờ (thông tin cho EDA dòng tiền)"
+DQ-12,Time,Phiên thiếu của từng mã so với lịch giao dịch chung (trong khoảng niêm yết của mã),282,196609,0.1434,Không tạo dòng giả; lợi suất tính giữa 2 phiên có thật. 0 dòng ở ngày có < 10 mã giao dịch
+DQ-13,Integration,Ngày giao dịch không có dữ liệu VN-Index từ nguồn DNSE,35,2468,1.4182,Không nội suy chỉ số; các ngày này không tính beta/capture/chế độ thị trường; CAGR tính theo năm lịch
