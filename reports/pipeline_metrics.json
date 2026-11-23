@@ -27,13 +27,17 @@
       "sector_regime": 22,
       "liquidity_quarterly": 440,
       "sector_corr": 121,
+      "sector_corr_regime": 121,
       "ticker_monthly": 9498,
       "abnormal_events": 272,
+      "flow_lead_lag": 60,
+      "systemic_risk_daily": 2433,
+      "ml_regime_sector": 33,
       "data_quality_report": 14
     }
   },
-  "spark_version": "4.0.5",
-  "period": "2017-01-01..2026-11-22",
+  "spark_version": "4.3.0",
+  "period": "2017-01-01..2026-11-23",
   "rf_annual": 0.03,
   "data_quality": [
     {
@@ -66,7 +70,7 @@
     {
       "check_id": "DQ-04",
       "nhom": "Validity",
-      "quy_tac": "Ngoài giai đoạn 2017-01-01..2026-11-22",
+      "quy_tac": "Ngoài giai đoạn 2017-01-01..2026-11-23",
       "so_vi_pham": 0,
       "tren_tong": 196609,
       "ty_le_pct": 0.0,
@@ -163,5 +167,5 @@
       "xu_ly": "Không nội suy chỉ số; các ngày này không tính beta/capture/chế độ thị trường; CAGR tính theo năm lịch"
     }
   ],
-  "elapsed_seconds": 205.2
+  "elapsed_seconds": 69.7
 }

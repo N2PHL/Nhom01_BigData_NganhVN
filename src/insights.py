@@ -24,7 +24,8 @@ QUESTIONS = {
 }
 
 GOLD_TABLES = ["ticker_kpi", "sector_kpi", "sector_daily", "market_daily", "sector_yearly", "sector_regime",
-               "liquidity_quarterly", "sector_corr", "ticker_monthly", "abnormal_events", "data_quality_report"]
+               "liquidity_quarterly", "sector_corr", "sector_corr_regime", "systemic_risk_daily",
+               "flow_lead_lag", "ml_regime_sector", "ticker_monthly", "abnormal_events", "data_quality_report"]
 
 
 def load_gold(csv_dir: Path) -> dict[str, pd.DataFrame]:
@@ -79,6 +80,23 @@ def generate(g: dict[str, pd.DataFrame]) -> dict[str, list[str]]:
         f"({top3_freq.max()}/{n_years} năm); thứ hạng biến động ít nhất là **{rank_sd.index[0]}**, "
         f"nhiều nhất là **{rank_sd.index[-1]}** → hiệu quả ngành có tính chu kỳ, không nên ngoại suy 1–2 năm gần nhất.",
     ]
+    if "cagr_lw" in sec.columns:
+        lw_beat = sec[sec.cagr_lw > bench.cagr]
+        gap = (sec["cagr"] - sec["cagr_lw"]).abs()
+        max_gap_row = sec.loc[gap.idxmax()]
+        res["Q1"].append(
+            f"**Kiểm chứng Size Effect (Bình quân đều vs Gia quyền thanh khoản):** khi tính trọng số theo thanh khoản 20 phiên trước, "
+            f"{len(lw_beat)}/{len(sec)} ngành vượt VN-Index (so với {len(beat)}/{len(sec)} ở rổ bình quân đều); "
+            f"chênh lệch lớn nhất ở **{max_gap_row.sector_name}** (EW {pct(max_gap_row.cagr)} vs LW {pct(max_gap_row.cagr_lw)})."
+        )
+    if "cvar_95" in sec.columns and "max_underwater_days" in sec.columns:
+        worst_cvar = sec.sort_values("cvar_95").iloc[0]
+        longest_uw = sec.sort_values("max_underwater_days", ascending=False).iloc[0]
+        res["Q1"].append(
+            f"**Rủi ro đuôi & thời gian về bờ:** CVaR 95% (trung bình 5% phiên xấu nhất) sâu nhất là **{worst_cvar.sector_name}** "
+            f"({pct(worst_cvar.cvar_95)}/phiên); thời gian chìm dưới đỉnh lâu nhất là **{longest_uw.sector_name}** "
+            f"({int(longest_uw.max_underwater_days)} phiên liên tiếp)."
+        )
 
     # ---------------- Q2 ----------------
     by_beta = sec.sort_values("beta")
@@ -98,6 +116,21 @@ def generate(g: dict[str, pd.DataFrame]) -> dict[str, list[str]]:
         (f"Khi VN-Index trên MA200, ngành vượt trội nhất: **{bull.iloc[0].sector_name}** "
          f"(vượt {pct(bull.iloc[0].ann_excess_vs_vnindex)}/năm).") if len(bull) else "Chưa đủ dữ liệu chế độ Tăng.",
     ]
+    if "ml_regime_sector" in g and len(g["ml_regime_sector"]):
+        ml_crash = g["ml_regime_sector"]
+        ml_crash = ml_crash[ml_crash.ml_regime.str.contains("Hoảng loạn", na=False)].sort_values("ann_excess_vs_vnindex", ascending=False)
+        if len(ml_crash):
+            res["Q2"].append(
+                f"**Phân cụm PySpark MLlib (K-Means 3 chế độ):** trong trạng thái *Hoảng loạn / Rủi ro cao*, "
+                f"ngành phòng thủ tốt nhất là **{ml_crash.iloc[0].sector_name}** (vượt VN-Index {pct(ml_crash.iloc[0].ann_excess_vs_vnindex)}/năm), "
+                f"chịu áp lực mạnh nhất là **{ml_crash.iloc[-1].sector_name}** ({pct(ml_crash.iloc[-1].ann_excess_vs_vnindex)}/năm)."
+            )
+    if "limit_hit_pct" in sec.columns:
+        lim_top = sec.sort_values("limit_hit_pct", ascending=False).iloc[0]
+        res["Q2"].append(
+            f"**Hiệu ứng biên độ trần/sàn (TTCK VN):** ngành có tần suất chạm trần/sàn cao nhất là **{lim_top.sector_name}** "
+            f"({pct(lim_top.limit_hit_pct, 2)} số phiên cổ phiếu) → lưu ý rủi ro trượt giá / trắng bên mua khi thị trường sốc."
+        )
 
     # ---------------- Q3 ----------------
     liq = g["liquidity_quarterly"].sort_values("quarter")
@@ -120,6 +153,17 @@ def generate(g: dict[str, pd.DataFrame]) -> dict[str, list[str]]:
         f"({pp(delta.iloc[-1])} tỷ trọng), thoát tiền mạnh nhất **{delta.index[0]}** "
         f"({pp(delta.iloc[0])}).",
     ]
+    if "flow_lead_lag" in g and len(g["flow_lead_lag"]):
+        fl = g["flow_lead_lag"]
+        fl_all = fl[fl.sector_code == "ALL"].set_index("flow_quintile")
+        if 1 in fl_all.index and 5 in fl_all.index:
+            r1_20, r5_20 = fl_all.loc[1, "avg_fwd_20d"], fl_all.loc[5, "avg_fwd_20d"]
+            r1_60, r5_60 = fl_all.loc[1, "avg_fwd_60d"], fl_all.loc[5, "avg_fwd_60d"]
+            verdict = "hiệu ứng **FOMO / quá nhiệt** (mua đuổi lúc thanh khoản bùng nổ cho lợi suất kém hơn lúc cạn cung)" if r5_60 < r1_60 else "hiệu ứng **Smart Money dẫn dắt** (dòng tiền bùng nổ duy trì đà tăng)"
+            res["Q3"].append(
+                f"**Kiểm định Lead–Lag Dòng tiền (Q5 Đột biến vs Q1 Cạn thanh khoản):** lợi suất trung bình 20 phiên sau là "
+                f"{pct(r5_20)} vs {pct(r1_20)}; sau 60 phiên là {pct(r5_60)} vs {pct(r1_60)} → phản ánh {verdict}."
+            )
 
     # ---------------- Q4 ----------------
     corr = g["sector_corr"]
@@ -135,6 +179,27 @@ def generate(g: dict[str, pd.DataFrame]) -> dict[str, list[str]]:
         f"{off.iloc[1].pair} ({num(off.iloc[1]['corr'])}).",
         f"Cặp tương quan cao nhất: **{off.iloc[-1].pair}** ({num(off.iloc[-1]['corr'])}) → nắm cả hai gần như không giảm rủi ro.",
     ]
+    if "sector_corr_regime" in g and len(g["sector_corr_regime"]):
+        cr = g["sector_corr_regime"]
+        cr_off = cr[cr.sector_a < cr.sector_b].copy()
+        cr_off["pair"] = cr_off.sector_a.map(names) + " – " + cr_off.sector_b.map(names)
+        avg_norm = cr_off["corr_normal"].mean()
+        avg_crash = cr_off["corr_crash"].mean()
+        betray = cr_off.sort_values("corr_diff", ascending=False).iloc[0]
+        shelter_pair = cr_off.sort_values("corr_crash").iloc[0]
+        res["Q4"].append(
+            f"**Tương quan có điều kiện (Tail Dependence — Bình thường vs Hoảng loạn mkt ≤ -1,5%):** tương quan trung bình "
+            f"dịch chuyển từ {num(avg_norm)} sang {num(avg_crash)}. Cặp tăng tương quan mạnh nhất khi sập: **{betray.pair}** "
+            f"({num(betray.corr_normal)} → {num(betray.corr_crash)}); cặp giữ tương quan thấp nhất khi sập: **{shelter_pair.pair}** ({num(shelter_pair.corr_crash)})."
+        )
+    if "systemic_risk_daily" in g and "absorption_ratio" in g["systemic_risk_daily"].columns:
+        sr = g["systemic_risk_daily"].dropna(subset=["absorption_ratio"])
+        if len(sr):
+            peak = sr.loc[sr["absorption_ratio"].idxmax()]
+            res["Q4"].append(
+                f"**Rủi ro hệ thống (Absorption Ratio — Random Matrix Theory, cửa sổ 120 phiên):** trung bình {pct(sr.absorption_ratio.mean())}, "
+                f"đạt đỉnh **{pct(peak.absorption_ratio)}** vào ngày {peak.date:%d/%m/%Y} (toàn bộ 11 ngành bị hút vào 1 nhân tố thị trường duy nhất)."
+            )
 
     # ---------------- Q5 ----------------
     tk = g["ticker_kpi"]

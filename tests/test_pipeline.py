@@ -81,3 +81,47 @@ def test_abnormal_return_is_flagged_not_rewritten(spark, tmp_path, monkeypatch):
     assert bb.is_band_breach is True and bb.is_abnormal_ret is False
     assert bb.ret_clean == pytest.approx(0.12)
     assert next(d for d in dq if d["check_id"] == "DQ-09b")["so_vi_pham"] == 1
+
+
+def test_underwater_days_and_cvar_95(spark):
+    from datetime import date
+    # Chuỗi drawdown: đỉnh -> 3 phiên chìm -> đỉnh mới -> 1 phiên chìm => max_underwater_days = 3
+    dd_rows = [
+        ("S1", date(2024, 1, 2), 0.0),
+        ("S1", date(2024, 1, 3), -0.05),
+        ("S1", date(2024, 1, 4), -0.10),
+        ("S1", date(2024, 1, 5), -0.02),
+        ("S1", date(2024, 1, 8), 0.0),
+        ("S1", date(2024, 1, 9), -0.03),
+    ]
+    df_dd = spark.createDataFrame(dd_rows, "sector_code string, date date, drawdown double")
+    uw = sp._max_underwater(df_dd, "sector_code", "drawdown").collect()
+    assert len(uw) == 1 and uw[0].max_underwater_days == 3
+
+    # 20 phiên lợi suất từ -0.10 đến +0.09 -> 5% xấu nhất là -0.10
+    ret_rows = [("S1", -0.10 + 0.01 * i) for i in range(20)]
+    df_ret = spark.createDataFrame(ret_rows, "sector_code string, ret double")
+    cv = sp._cvar_95(df_ret, "sector_code", "ret").collect()
+    assert len(cv) == 1 and cv[0].cvar_95 <= -0.09
+
+
+def test_microstructure_features_amihud_and_limit_hit(spark, tmp_path, monkeypatch):
+    from datetime import date
+    monkeypatch.setattr(sp.config, "START_DATE", date(2024, 1, 1))
+    monkeypatch.setattr(sp.config, "END_DATE", date(2024, 12, 31))
+    dates = ["2024-01-02", "2024-01-03", "2024-01-04"]
+    # Phiên 2 tăng đúng trần HOSE +7% (20.0 -> 21.4)
+    _write(tmp_path / "stock" / "AAA" / "2024.json", "AAA", dates, [20.0, 21.4, 21.6])
+    univ = spark.createDataFrame([("AAA", "A", "HOSE", "1", "S1", "Ngành 1")], sp.UNIVERSE_SCHEMA)
+    market = spark.createDataFrame(
+        [(datetime.fromisoformat(d).date(), 1200.0, 0.005, 1150.0, "Tăng (trên MA200)", 1200.0, 0.005) for d in dates],
+        "date date, mkt_close double, mkt_ret double, mkt_ma200 double, regime string, vn30_close double, vn30_ret double",
+    )
+    bars = sp.explode_bars(sp.read_raw_json(spark, tmp_path / "stock"))
+    clean, _, _ = sp.quality_and_clean(bars, univ, market)
+    feat = sp.add_features(clean, market).orderBy("date").collect()
+    assert feat[1].is_limit_hit is True
+    assert feat[2].is_limit_hit is False
+    assert feat[1].amihud > 0
+    # avg_val_20d_lag ở phiên 2 phải chỉ dùng phiên 1 (không look-ahead)
+    assert feat[1].avg_val_20d_lag == pytest.approx(feat[0].traded_value_bn)

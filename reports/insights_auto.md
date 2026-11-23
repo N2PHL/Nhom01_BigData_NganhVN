@@ -6,6 +6,8 @@
 - Dẫn đầu theo Sharpe là **Bán lẻ** (CAGR 20,7%, Sharpe 0,77, MaxDD -49,7%); thấp nhất là **Tài nguyên cơ bản** (CAGR 6,7%, Sharpe 0,27).
 - 9/11 ngành (rổ bình quân đều) có CAGR cao hơn VN-Index: Bán lẻ, Hàng & Dịch vụ công nghiệp, Dịch vụ tài chính, Ngân hàng, Hóa chất, Điện, nước & xăng dầu khí đốt, Bất động sản, Thực phẩm & Đồ uống, Dầu khí.
 - Tính ổn định (9 năm đủ dữ liệu): ngành lọt top 3 nhiều năm nhất là **Bất động sản** (5/9 năm); thứ hạng biến động ít nhất là **Hàng & Dịch vụ công nghiệp**, nhiều nhất là **Điện, nước & xăng dầu khí đốt** → hiệu quả ngành có tính chu kỳ, không nên ngoại suy 1–2 năm gần nhất.
+- **Kiểm chứng Size Effect (Bình quân đều vs Gia quyền thanh khoản):** khi tính trọng số theo thanh khoản 20 phiên trước, 7/11 ngành vượt VN-Index (so với 9/11 ở rổ bình quân đều); chênh lệch lớn nhất ở **Thực phẩm & Đồ uống** (EW 12,0% vs LW 2,0%).
+- **Rủi ro đuôi & thời gian về bờ:** CVaR 95% (trung bình 5% phiên xấu nhất) sâu nhất là **Dầu khí** (-6,0%/phiên); thời gian chìm dưới đỉnh lâu nhất là **Tài nguyên cơ bản** (1262 phiên liên tiếp).
 
 ## Q2. Ngành nào phòng thủ, ngành nào tấn công (beta, upside/downside capture, hiệu quả khi VN-Index dưới MA200)?
 
@@ -13,18 +15,23 @@
 - Ngành có đặc tính phòng thủ (beta < 1 và downside capture < 1): Bán lẻ (down 0,84), Hàng & Dịch vụ công nghiệp (down 0,77), Hóa chất (down 0,80), Điện, nước & xăng dầu khí đốt (down 0,59), Thực phẩm & Đồ uống (down 0,74), Xây dựng & Vật liệu (down 0,90).
 - Khi VN-Index dưới MA200, ngành giữ giá tốt nhất so với thị trường: **Điện, nước & xăng dầu khí đốt** (vượt 27,9%/năm); kém nhất: **Bất động sản** (-8,6%/năm).
 - Khi VN-Index trên MA200, ngành vượt trội nhất: **Dịch vụ tài chính** (vượt 27,1%/năm).
+- **Phân cụm PySpark MLlib (K-Means 3 chế độ):** trong trạng thái *Hoảng loạn / Rủi ro cao*, ngành phòng thủ tốt nhất là **Hàng & Dịch vụ công nghiệp** (vượt VN-Index 30,8%/năm), chịu áp lực mạnh nhất là **Dịch vụ tài chính** (-22,6%/năm).
+- **Hiệu ứng biên độ trần/sàn (TTCK VN):** ngành có tần suất chạm trần/sàn cao nhất là **Dịch vụ tài chính** (4,90% số phiên cổ phiếu) → lưu ý rủi ro trượt giá / trắng bên mua khi thị trường sốc.
 
 ## Q3. Dòng tiền (giá trị giao dịch) dịch chuyển giữa các ngành ra sao; ngành nào đang hút hoặc thoát tiền?
 
 - Giá trị giao dịch bình quân/phiên của 81 mã thay đổi từ 546 tỷ đồng (2017-Q1) lên 8028 tỷ đồng (2026-Q4).
 - Quý gần nhất (2026-Q4) ngành chiếm tỷ trọng thanh khoản lớn nhất: **Ngân hàng** (23,3%).
 - So 4 quý gần nhất với 4 quý trước đó: hút tiền mạnh nhất **Dầu khí** (+4,8 điểm % tỷ trọng), thoát tiền mạnh nhất **Dịch vụ tài chính** (-4,8 điểm %).
+- **Kiểm định Lead–Lag Dòng tiền (Q5 Đột biến vs Q1 Cạn thanh khoản):** lợi suất trung bình 20 phiên sau là 2,3% vs 1,0%; sau 60 phiên là 5,9% vs 3,0% → phản ánh hiệu ứng **Smart Money dẫn dắt** (dòng tiền bùng nổ duy trì đà tăng).
 
 ## Q4. Các ngành tương quan với nhau đến đâu; cặp ngành nào giúp đa dạng hóa danh mục tốt nhất?
 
 - Tương quan lợi suất ngày trung bình giữa các cặp ngành: 0,62 → các ngành cùng chịu nhân tố thị trường chung, đa dạng hóa chỉ theo ngành có tác dụng giới hạn.
 - Cặp ít tương quan nhất: **Dầu khí – Bất động sản** (0,48); Ngân hàng – Hóa chất (0,48).
 - Cặp tương quan cao nhất: **Hàng & Dịch vụ công nghiệp – Bán lẻ** (0,71) → nắm cả hai gần như không giảm rủi ro.
+- **Tương quan có điều kiện (Tail Dependence — Bình thường vs Hoảng loạn mkt ≤ -1,5%):** tương quan trung bình dịch chuyển từ 0,46 sang 0,60. Cặp tăng tương quan mạnh nhất khi sập: **Hóa chất – Hàng & Dịch vụ công nghiệp** (0,53 → 0,78); cặp giữ tương quan thấp nhất khi sập: **Ngân hàng – Hóa chất** (0,36).
+- **Rủi ro hệ thống (Absorption Ratio — Random Matrix Theory, cửa sổ 120 phiên):** trung bình 63,4%, đạt đỉnh **81,6%** vào ngày 07/08/2020 (toàn bộ 11 ngành bị hút vào 1 nhân tố thị trường duy nhất).
 
 ## Q5. Trong từng ngành, mã nào dẫn dắt và mức độ phân hóa giữa các mã cùng ngành lớn đến đâu?
 

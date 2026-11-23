@@ -28,13 +28,17 @@ import sys
 import time
 from pathlib import Path
 
+import numpy as np
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import config  # noqa: E402
 
+from pyspark.ml.clustering import KMeans  # noqa: E402
+from pyspark.ml.feature import StandardScaler, VectorAssembler  # noqa: E402
 from pyspark.sql import DataFrame, SparkSession, Window  # noqa: E402
 from pyspark.sql import functions as F  # noqa: E402
 from pyspark.sql.types import (  # noqa: E402
-    ArrayType, DoubleType, LongType, StringType, StructField, StructType,
+    ArrayType, DateType, DoubleType, LongType, StringType, StructField, StructType,
 )
 
 # ---------------------------------------------------------------------------
@@ -346,16 +350,25 @@ def add_features(df: DataFrame, market: DataFrame) -> DataFrame:
     w = Window.partitionBy("ticker").orderBy("date")
     w_cum = w.rowsBetween(Window.unboundedPreceding, 0)
     w20 = w.rowsBetween(-19, 0)
+    w20_lag = w.rowsBetween(-20, -1)             # 20 phiên TRƯỚC đó (không look-ahead) cho trọng số thanh khoản
+    w50 = w.rowsBetween(-49, 0)
     w200 = w.rowsBetween(-199, 0)
     wb = w.rowsBetween(-(config.BETA_WINDOW - 1), 0)
     both = F.col("ret_clean").isNotNull() & F.col("mkt_ret").isNotNull()
     x, y = F.when(both, F.col("ret_clean")), F.when(both, F.col("mkt_ret"))
     return (
         df.withColumn("traded_value_bn", F.col("close") * F.col("volume") / 1e6)   # nghìn đồng × CP -> tỷ đồng
+        # Đặc trưng vi mô TTCK VN: kém thanh khoản Amihud (|ret| / GTGD tỷ đồng) & chạm biên độ trần/sàn
+        .withColumn("amihud", F.when((F.col("traded_value_bn") > 0) & (~F.col("is_no_trade")) & F.col("ret_clean").isNotNull(),
+                                     F.abs(F.col("ret_clean")) / F.col("traded_value_bn")))
+        .withColumn("is_limit_hit", F.coalesce(F.abs(F.col("ret_1d")) >= (F.col("price_band") - F.lit(0.003)), F.lit(False)))
+        .withColumn("avg_val_20d_lag", F.avg(F.when(~F.col("is_no_trade"), F.col("traded_value_bn"))).over(w20_lag))
         # Chỉ số tài sản dựng từ ret_clean (miễn nhiễm với bước nhảy giá do sự kiện quyền)
         .withColumn("wealth", F.exp(F.sum(F.log1p(F.coalesce("ret_clean", F.lit(0.0)))).over(w_cum)))
         .withColumn("drawdown", F.col("wealth") / F.max("wealth").over(w_cum) - 1)
         .withColumn("vol_20d", F.stddev("ret_clean").over(w20) * math.sqrt(config.TRADING_DAYS))
+        .withColumn("above_ma50", F.when(F.count("wealth").over(w50) >= 50,
+                                         F.col("wealth") >= F.avg("wealth").over(w50)))
         .withColumn("trend_vs_ma200", F.col("wealth") / F.avg("wealth").over(w200) - 1)
         .withColumn("excess_ret", F.col("ret_clean") - F.col("mkt_ret"))
         .withColumn("_n", F.count(x).over(wb))
@@ -371,8 +384,130 @@ def add_features(df: DataFrame, market: DataFrame) -> DataFrame:
 
 
 # ===========================================================================
-# 7. GOLD — BẢNG KPI PHỤC VỤ PHÂN TÍCH / BI
+# 7. GOLD — BẢNG KPI PHỤC VỤ PHÂN TÍCH / BI (kèm Econophysics & PySpark MLlib)
 # ===========================================================================
+def _max_underwater(df: DataFrame, group_col: str, dd_col: str = "drawdown") -> DataFrame:
+    """Đếm chuỗi phiên dài nhất liên tiếp bị chìm dưới đỉnh (Time-to-Recovery) bằng Spark Window."""
+    w = Window.partitionBy(group_col).orderBy("date")
+    w_cum = w.rowsBetween(Window.unboundedPreceding, 0)
+    marked = (
+        df.select(group_col, "date", dd_col)
+        .withColumn("_is_peak", F.when(F.col(dd_col) >= F.lit(-1e-9), F.lit(1)).otherwise(F.lit(0)))
+        .withColumn("_grp", F.sum("_is_peak").over(w_cum))
+    )
+    return (
+        marked.groupBy(group_col, "_grp")
+        .agg(F.sum(F.when(F.col(dd_col) < F.lit(-1e-9), F.lit(1)).otherwise(F.lit(0))).alias("_uw"))
+        .groupBy(group_col)
+        .agg(F.max("_uw").alias("max_underwater_days"))
+    )
+
+
+def _cvar_95(df: DataFrame, group_col: str, ret_col: str) -> DataFrame:
+    """Tính Expected Shortfall / CVaR 95% (trung bình của 5% phiên giảm sâu nhất) bằng Spark."""
+    p05 = df.groupBy(group_col).agg(F.percentile_approx(ret_col, 0.05).alias("_p05"))
+    return (
+        df.select(group_col, ret_col)
+        .join(p05, group_col, "left")
+        .groupBy(group_col)
+        .agg(F.avg(F.when(F.col(ret_col) <= F.col("_p05"), F.col(ret_col))).alias("cvar_95"))
+    )
+
+
+def compute_absorption_ratio(spark: SparkSession, sector_daily: DataFrame, window: int = 120) -> DataFrame:
+    """
+    Chỉ số Rủi ro Hệ thống Absorption Ratio (Kritzman / Random Matrix Theory):
+      AR_t = lambda_1 / sum(lambda_i) của ma trận tương quan trượt `window` phiên giữa 11 ngành.
+    Khi AR tăng vọt, toàn thị trường đồng pha theo 1 nhân tố duy nhất -> rủi ro hệ thống cao.
+    """
+    rows = (
+        sector_daily.filter(F.col("sector_ret").isNotNull())
+        .select("date", "sector_code", "sector_ret")
+        .orderBy("date", "sector_code")
+        .collect()
+    )
+    dates = sorted({r.date for r in rows})
+    codes = sorted({r.sector_code for r in rows})
+    d_idx = {d: i for i, d in enumerate(dates)}
+    c_idx = {c: j for j, c in enumerate(codes)}
+    mat = np.full((len(dates), len(codes)), np.nan, dtype=float)
+    for r in rows:
+        mat[d_idx[r.date], c_idx[r.sector_code]] = float(r.sector_ret)
+
+    out = []
+    for i in range(window - 1, len(dates)):
+        sub = mat[i - window + 1 : i + 1]
+        valid_rows = ~np.isnan(sub).any(axis=1)
+        clean = sub[valid_rows]
+        if clean.shape[0] < max(30, window // 2):
+            continue
+        std = clean.std(axis=0)
+        if np.any(std <= 1e-12):
+            continue
+        corr = np.corrcoef(clean, rowvar=False)
+        if np.isnan(corr).any():
+            continue
+        evals = np.linalg.eigvalsh(corr)
+        total = float(np.sum(evals))
+        if total > 0:
+            out.append((dates[i], float(evals[-1] / total)))
+
+    schema = StructType([StructField("date", DateType()), StructField("absorption_ratio", DoubleType())])
+    return spark.createDataFrame(out, schema=schema)
+
+
+def build_systemic_and_ml_regime(spark: SparkSession, silver: DataFrame, market: DataFrame,
+                                 sector_daily: DataFrame) -> DataFrame:
+    """Kết hợp Market Breadth, Absorption Ratio (RMT) và phân cụm K-Means (PySpark MLlib) 3 chế độ thị trường."""
+    breadth = silver.groupBy("date").agg(
+        F.avg(F.when(F.col("above_ma50").isNotNull(), F.col("above_ma50").cast("double"))).alias("breadth_ma50"),
+        F.percentile_approx("amihud", 0.5).alias("mkt_amihud_median"),
+    )
+    wm = Window.orderBy("date")
+    wm20 = wm.rowsBetween(-19, 0)
+    mkt_feat = (
+        market.filter(F.col("date").between(F.lit(config.START_DATE), F.lit(config.END_DATE)))
+        .select("date", "mkt_close", "mkt_ret", "regime")
+        .withColumn("mkt_ret_20d", F.exp(F.sum(F.log1p(F.coalesce("mkt_ret", F.lit(0.0)))).over(wm20)) - 1)
+        .withColumn("mkt_vol_20d", F.stddev("mkt_ret").over(wm20) * math.sqrt(config.TRADING_DAYS))
+    )
+    ar_df = compute_absorption_ratio(spark, sector_daily, window=120)
+    base = mkt_feat.join(breadth, "date", "left").join(ar_df, "date", "left").cache()
+
+    feat_cols = ["mkt_ret_20d", "mkt_vol_20d", "breadth_ma50", "absorption_ratio"]
+    train = base.dropna(subset=feat_cols)
+    if train.count() >= 60:
+        assembler = VectorAssembler(inputCols=feat_cols, outputCol="_raw_vec")
+        scaler = StandardScaler(inputCol="_raw_vec", outputCol="_vec", withMean=True, withStd=True)
+        kmeans = KMeans(k=3, seed=42, featuresCol="_vec", predictionCol="_cluster")
+        vdf = assembler.transform(train)
+        smodel = scaler.fit(vdf)
+        sdf = smodel.transform(vdf)
+        kmodel = kmeans.fit(sdf)
+        pred = kmodel.transform(sdf)
+
+        # Gán nhãn ngữ nghĩa tự động dựa trên đặc trưng trung bình của từng cụm
+        stats = (
+            pred.groupBy("_cluster")
+            .agg(F.avg("mkt_ret_20d").alias("r20"), F.avg("mkt_vol_20d").alias("v20"))
+            .collect()
+        )
+        # Cụm rủi ro nhất: lợi suất 20p thấp nhất; cụm tăng bền vững: lợi suất 20p cao nhất
+        by_ret = sorted(stats, key=lambda x: x.r20)
+        label_map = {
+            by_ret[0]._cluster: "ML: Hoảng loạn / Rủi ro cao",
+            by_ret[1]._cluster: "ML: Tích lũy / Chuyển pha",
+            by_ret[2]._cluster: "ML: Tăng bền vững",
+        }
+        map_expr = F.create_map([F.lit(x) for kv in label_map.items() for x in kv])
+        labeled = pred.select("date", map_expr[F.col("_cluster")].alias("ml_regime"))
+        out = base.join(labeled, "date", "left")
+    else:
+        out = base.withColumn("ml_regime", F.lit(None).cast("string"))
+
+    return out.orderBy("date")
+
+
 def build_gold(spark: SparkSession, silver: DataFrame, market: DataFrame, coverage: DataFrame) -> dict[str, DataFrame]:
     rf, td = config.RF_ANNUAL, config.TRADING_DAYS
     silver.createOrReplaceTempView("silver")
@@ -380,91 +515,135 @@ def build_gold(spark: SparkSession, silver: DataFrame, market: DataFrame, covera
           .createOrReplaceTempView("market")
     gold: dict[str, DataFrame] = {}
 
-    # (A) KPI từng mã — Spark SQL
-    gold["ticker_kpi"] = spark.sql(f"""
-        SELECT ticker, company_name, exchange, sector_code, sector_name,
-               MIN(date) AS first_date, MAX(date) AS last_date, COUNT(*) AS n_sessions,
-               COUNT(ret_clean) AS n_valid_returns,
-               EXP(SUM(LN(1 + ret_clean))) - 1 AS total_return,
-               POWER(EXP(SUM(LN(1 + ret_clean))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1 AS cagr,
-               STDDEV_SAMP(ret_clean) * SQRT({td}) AS ann_vol,
-               (AVG(ret_clean) * {td} - {rf}) / (STDDEV_SAMP(ret_clean) * SQRT({td})) AS sharpe,
-               MIN(drawdown) AS max_drawdown,
-               COVAR_SAMP(ret_clean, mkt_ret) / VAR_SAMP(CASE WHEN ret_clean IS NOT NULL THEN mkt_ret END) AS beta,
-               CORR(ret_clean, mkt_ret) AS corr_vnindex,
-               AVG(CASE WHEN NOT is_no_trade THEN traded_value_bn END) AS avg_value_bn,
-               PERCENTILE_APPROX(CASE WHEN NOT is_no_trade THEN traded_value_bn END, 0.5) AS median_value_bn,
-               MAX_BY(close, date) AS last_close_kvnd,
-               SUM(CAST(is_abnormal_ret AS INT)) AS n_abnormal_ret,
-               SUM(CAST(is_band_breach AS INT)) AS n_band_breach,
-               SUM(CAST(is_no_trade AS INT)) AS n_no_trade,
-               SUM(CAST(is_volume_spike AS INT)) AS n_volume_spike
-        FROM silver
-        GROUP BY ticker, company_name, exchange, sector_code, sector_name
-    """).join(coverage.select("ticker", "n_expected"), "ticker", "left") \
+    # (A) KPI từng mã — Spark SQL + Tail Risk & Microstructure
+    tk_uw = _max_underwater(silver, "ticker", "drawdown")
+    tk_cvar = _cvar_95(silver, "ticker", "ret_clean")
+    gold["ticker_kpi"] = (
+        spark.sql(f"""
+            SELECT ticker, company_name, exchange, sector_code, sector_name,
+                   MIN(date) AS first_date, MAX(date) AS last_date, COUNT(*) AS n_sessions,
+                   COUNT(ret_clean) AS n_valid_returns,
+                   EXP(SUM(LN(1 + ret_clean))) - 1 AS total_return,
+                   POWER(EXP(SUM(LN(1 + ret_clean))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1 AS cagr,
+                   STDDEV_SAMP(ret_clean) * SQRT({td}) AS ann_vol,
+                   (AVG(ret_clean) * {td} - {rf}) / (STDDEV_SAMP(ret_clean) * SQRT({td})) AS sharpe,
+                   MIN(drawdown) AS max_drawdown,
+                   (POWER(EXP(SUM(LN(1 + ret_clean))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1)
+                       / NULLIF(ABS(MIN(drawdown)), 0) AS calmar,
+                   SKEWNESS(ret_clean) AS skewness,
+                   KURTOSIS(ret_clean) AS excess_kurtosis,
+                   COVAR_SAMP(ret_clean, mkt_ret) / VAR_SAMP(CASE WHEN ret_clean IS NOT NULL THEN mkt_ret END) AS beta,
+                   CORR(ret_clean, mkt_ret) AS corr_vnindex,
+                   AVG(CASE WHEN NOT is_no_trade THEN traded_value_bn END) AS avg_value_bn,
+                   PERCENTILE_APPROX(CASE WHEN NOT is_no_trade THEN traded_value_bn END, 0.5) AS median_value_bn,
+                   PERCENTILE_APPROX(amihud, 0.5) AS median_amihud,
+                   AVG(CAST(is_limit_hit AS DOUBLE)) AS limit_hit_pct,
+                   MAX_BY(close, date) AS last_close_kvnd,
+                   SUM(CAST(is_abnormal_ret AS INT)) AS n_abnormal_ret,
+                   SUM(CAST(is_band_breach AS INT)) AS n_band_breach,
+                   SUM(CAST(is_no_trade AS INT)) AS n_no_trade,
+                   SUM(CAST(is_volume_spike AS INT)) AS n_volume_spike
+            FROM silver
+            GROUP BY ticker, company_name, exchange, sector_code, sector_name
+        """)
+        .join(coverage.select("ticker", "n_expected"), "ticker", "left")
+        .join(tk_uw, "ticker", "left")
+        .join(tk_cvar, "ticker", "left")
         .withColumn("coverage_pct", F.col("n_sessions") / F.col("n_expected"))
+    )
 
-    # (B) Chỉ số ngành bình quân đều (equal-weight) theo ngày
+    # (B) Chỉ số ngành: Bình quân đều (Equal-Weight) + Gia quyền thanh khoản (Liquidity-Weighted, lag 20p)
     sector_daily = spark.sql(f"""
         SELECT sector_code, sector_name, date,
                CASE WHEN COUNT(ret_clean) >= {MIN_SECTOR_CONSTITUENTS} THEN AVG(ret_clean) END AS sector_ret,
+               CASE WHEN COUNT(CASE WHEN ret_clean IS NOT NULL AND avg_val_20d_lag > 0 THEN 1 END) >= {MIN_SECTOR_CONSTITUENTS}
+                    THEN SUM(CASE WHEN ret_clean IS NOT NULL AND avg_val_20d_lag > 0 THEN ret_clean * avg_val_20d_lag END)
+                         / NULLIF(SUM(CASE WHEN ret_clean IS NOT NULL AND avg_val_20d_lag > 0 THEN avg_val_20d_lag END), 0)
+               END AS sector_ret_lw,
                COUNT(ret_clean) AS n_constituents,
-               SUM(traded_value_bn) AS value_bn
+               SUM(traded_value_bn) AS value_bn,
+               PERCENTILE_APPROX(amihud, 0.5) AS amihud_median,
+               AVG(CAST(is_limit_hit AS DOUBLE)) AS pct_limit_hit
         FROM silver GROUP BY sector_code, sector_name, date
     """).join(market.select("date", "mkt_ret", "mkt_close", "regime"), "date", "left")
     ws = Window.partitionBy("sector_code").orderBy("date")
     ws_cum = ws.rowsBetween(Window.unboundedPreceding, 0)
-    sector_daily = (sector_daily
-                    .withColumn("sector_index", 100 * F.exp(F.sum(F.log1p(F.coalesce("sector_ret", F.lit(0.0)))).over(ws_cum)))
-                    .withColumn("drawdown", F.col("sector_index") / F.max("sector_index").over(ws_cum) - 1)
-                    .withColumn("year", F.year("date")))
+    sector_daily = (
+        sector_daily
+        .withColumn("sector_index", 100 * F.exp(F.sum(F.log1p(F.coalesce("sector_ret", F.lit(0.0)))).over(ws_cum)))
+        .withColumn("sector_index_lw", 100 * F.exp(F.sum(F.log1p(F.coalesce("sector_ret_lw", F.lit(0.0)))).over(ws_cum)))
+        .withColumn("drawdown", F.col("sector_index") / F.max("sector_index").over(ws_cum) - 1)
+        .withColumn("year", F.year("date"))
+    ).cache()
     gold["sector_daily"] = sector_daily
     sector_daily.createOrReplaceTempView("sector_daily")
 
     # (C) Chuỗi VN-Index chuẩn hóa để so sánh (benchmark)
     wm = Window.orderBy("date").rowsBetween(Window.unboundedPreceding, 0)
-    market_daily = (spark.table("market")
-                    .withColumn("vnindex_rebased", 100 * F.exp(F.sum(F.log1p(F.coalesce("mkt_ret", F.lit(0.0)))).over(wm)))
-                    .withColumn("drawdown", F.col("vnindex_rebased") / F.max("vnindex_rebased").over(wm) - 1))
+    market_daily = (
+        spark.table("market")
+        .withColumn("vnindex_rebased", 100 * F.exp(F.sum(F.log1p(F.coalesce("mkt_ret", F.lit(0.0)))).over(wm)))
+        .withColumn("drawdown", F.col("vnindex_rebased") / F.max("vnindex_rebased").over(wm) - 1)
+    ).cache()
     gold["market_daily"] = market_daily
     market_daily.createOrReplaceTempView("market_daily")
 
-    # (D) KPI ngành (Q1, Q2) + dòng benchmark VN-Index
+    # (D) KPI ngành (Q1, Q2) + Equal-Weight vs Liquidity-Weighted + Tail Risk & Microstructure
+    sec_uw = _max_underwater(sector_daily, "sector_code", "drawdown")
+    sec_cvar = _cvar_95(sector_daily, "sector_code", "sector_ret")
+    mkt_uw = _max_underwater(market_daily.withColumn("sector_code", F.lit("VNINDEX")), "sector_code", "drawdown")
+    mkt_cvar = _cvar_95(market_daily.withColumn("sector_code", F.lit("VNINDEX")), "sector_code", "mkt_ret")
+
     sector_kpi = spark.sql(f"""
         SELECT sector_code, sector_name,
                COUNT(sector_ret) AS n_days,
                POWER(EXP(SUM(LN(1 + sector_ret))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1 AS cagr,
+               POWER(EXP(SUM(LN(1 + sector_ret_lw))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1 AS cagr_lw,
                STDDEV_SAMP(sector_ret) * SQRT({td}) AS ann_vol,
                (AVG(sector_ret) * {td} - {rf}) / (STDDEV_SAMP(sector_ret) * SQRT({td})) AS sharpe,
+               (AVG(sector_ret_lw) * {td} - {rf}) / (STDDEV_SAMP(sector_ret_lw) * SQRT({td})) AS sharpe_lw,
                (AVG(sector_ret) * {td} - {rf}) /
                    (SQRT(AVG(CASE WHEN sector_ret < 0 THEN sector_ret * sector_ret ELSE 0 END)) * SQRT({td})) AS sortino,
                MIN(drawdown) AS max_drawdown,
+               (POWER(EXP(SUM(LN(1 + sector_ret))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1)
+                   / NULLIF(ABS(MIN(drawdown)), 0) AS calmar,
+               SKEWNESS(sector_ret) AS skewness,
+               KURTOSIS(sector_ret) AS excess_kurtosis,
                COVAR_SAMP(sector_ret, mkt_ret) / VAR_SAMP(CASE WHEN sector_ret IS NOT NULL THEN mkt_ret END) AS beta,
                CORR(sector_ret, mkt_ret) AS corr_vnindex,
                AVG(CASE WHEN mkt_ret > 0 THEN sector_ret END) / AVG(CASE WHEN mkt_ret > 0 AND sector_ret IS NOT NULL THEN mkt_ret END) AS upside_capture,
                AVG(CASE WHEN mkt_ret < 0 THEN sector_ret END) / AVG(CASE WHEN mkt_ret < 0 AND sector_ret IS NOT NULL THEN mkt_ret END) AS downside_capture,
                AVG(CASE WHEN sector_ret > mkt_ret THEN 1.0 ELSE 0.0 END) AS pct_days_beat_vnindex,
                AVG(value_bn) AS avg_daily_value_bn,
-               SUM(value_bn) AS total_value_bn
+               SUM(value_bn) AS total_value_bn,
+               PERCENTILE_APPROX(amihud_median, 0.5) AS median_amihud,
+               AVG(pct_limit_hit) AS limit_hit_pct
         FROM sector_daily GROUP BY sector_code, sector_name
-    """)
+    """).join(sec_uw, "sector_code", "left").join(sec_cvar, "sector_code", "left")
     total_val = sector_kpi.agg(F.sum("total_value_bn")).first()[0] or 1.0
     sector_kpi = sector_kpi.withColumn("value_share", F.col("total_value_bn") / F.lit(total_val))
     bench = spark.sql(f"""
         SELECT 'VNINDEX' AS sector_code, 'VN-Index (benchmark)' AS sector_name, COUNT(mkt_ret) AS n_days,
                POWER(EXP(SUM(LN(1 + mkt_ret))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1 AS cagr,
+               POWER(EXP(SUM(LN(1 + mkt_ret))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1 AS cagr_lw,
                STDDEV_SAMP(mkt_ret) * SQRT({td}) AS ann_vol,
                (AVG(mkt_ret) * {td} - {rf}) / (STDDEV_SAMP(mkt_ret) * SQRT({td})) AS sharpe,
+               (AVG(mkt_ret) * {td} - {rf}) / (STDDEV_SAMP(mkt_ret) * SQRT({td})) AS sharpe_lw,
                (AVG(mkt_ret) * {td} - {rf}) /
                    (SQRT(AVG(CASE WHEN mkt_ret < 0 THEN mkt_ret * mkt_ret ELSE 0 END)) * SQRT({td})) AS sortino,
-               MIN(drawdown) AS max_drawdown, CAST(1 AS DOUBLE) AS beta, CAST(1 AS DOUBLE) AS corr_vnindex,
+               MIN(drawdown) AS max_drawdown,
+               (POWER(EXP(SUM(LN(1 + mkt_ret))), 365.25 / DATEDIFF(MAX(date), MIN(date))) - 1)
+                   / NULLIF(ABS(MIN(drawdown)), 0) AS calmar,
+               SKEWNESS(mkt_ret) AS skewness,
+               KURTOSIS(mkt_ret) AS excess_kurtosis,
+               CAST(1 AS DOUBLE) AS beta, CAST(1 AS DOUBLE) AS corr_vnindex,
                CAST(1 AS DOUBLE) AS upside_capture, CAST(1 AS DOUBLE) AS downside_capture, CAST(NULL AS DOUBLE) AS pct_days_beat_vnindex,
                CAST(NULL AS DOUBLE) AS avg_daily_value_bn, CAST(NULL AS DOUBLE) AS total_value_bn,
+               CAST(NULL AS DOUBLE) AS median_amihud, CAST(NULL AS DOUBLE) AS limit_hit_pct,
                CAST(NULL AS DOUBLE) AS value_share
         FROM market_daily
-    """)
+    """).join(mkt_uw, "sector_code", "left").join(mkt_cvar, "sector_code", "left")
     sector_kpi = sector_kpi.unionByName(bench)
-    # xếp hạng theo Sharpe (window không partition -> dữ liệu 12 dòng nên an toàn)
     gold["sector_kpi"] = sector_kpi.withColumn(
         "rank_sharpe", F.when(F.col("sector_code") != "VNINDEX",
                               F.dense_rank().over(Window.orderBy(F.col("sharpe").desc()))))
@@ -486,7 +665,7 @@ def build_gold(spark: SparkSession, silver: DataFrame, market: DataFrame, covera
     """)
     gold["sector_yearly"] = yearly
 
-    # (F) Hiệu quả theo chế độ thị trường (Q2: ngành phòng thủ / tấn công)
+    # (F) Hiệu quả theo chế độ thị trường MA200 (Q2)
     gold["sector_regime"] = spark.sql(f"""
         SELECT sector_code, sector_name, regime, COUNT(sector_ret) AS n_days,
                AVG(sector_ret) * {td} AS ann_mean_return,
@@ -513,11 +692,28 @@ def build_gold(spark: SparkSession, silver: DataFrame, market: DataFrame, covera
         .withColumn("rank_in_quarter", F.rank().over(wq.orderBy(F.col("value_bn").desc())))
     )
 
-    # (H) Ma trận tương quan lợi suất ngày giữa các ngành — self-join theo ngày (Q4)
-    a = sector_daily.select("date", F.col("sector_code").alias("sector_a"), F.col("sector_ret").alias("ra"))
+    # (H) Ma trận tương quan lợi suất ngày toàn giai đoạn — self-join theo ngày (Q4)
+    a = sector_daily.select("date", "mkt_ret", F.col("sector_code").alias("sector_a"), F.col("sector_ret").alias("ra"))
     b = sector_daily.select("date", F.col("sector_code").alias("sector_b"), F.col("sector_ret").alias("rb"))
-    gold["sector_corr"] = (a.join(b, "date").groupBy("sector_a", "sector_b")
+    ab = a.join(b, "date")
+    gold["sector_corr"] = (ab.groupBy("sector_a", "sector_b")
                            .agg(F.corr("ra", "rb").alias("corr"), F.count(F.col("ra") * F.col("rb")).alias("n_days")))
+
+    # (H2) Ma trận tương quan có điều kiện (Conditional / Tail Correlation: Bình thường vs Hoảng loạn mkt <= -1.5%)
+    corr_norm = (
+        ab.filter(F.col("mkt_ret") > F.lit(-0.015))
+        .groupBy("sector_a", "sector_b")
+        .agg(F.corr("ra", "rb").alias("corr_normal"), F.count(F.col("ra") * F.col("rb")).alias("n_normal"))
+    )
+    corr_crash = (
+        ab.filter(F.col("mkt_ret") <= F.lit(-0.015))
+        .groupBy("sector_a", "sector_b")
+        .agg(F.corr("ra", "rb").alias("corr_crash"), F.count(F.col("ra") * F.col("rb")).alias("n_crash"))
+    )
+    gold["sector_corr_regime"] = (
+        corr_norm.join(corr_crash, ["sector_a", "sector_b"], "outer")
+        .withColumn("corr_diff", F.col("corr_crash") - F.col("corr_normal"))
+    )
 
     # (I) Lợi suất tháng từng mã (drill-down)
     gold["ticker_monthly"] = (silver.groupBy("ticker", "sector_code", "sector_name", "month")
@@ -532,6 +728,60 @@ def build_gold(spark: SparkSession, silver: DataFrame, market: DataFrame, covera
                                        "prev_close", "close", "ret_1d", "price_band", "is_band_breach",
                                        "is_abnormal_ret", "is_long_gap")
                                .orderBy(F.abs("ret_1d").desc()))
+
+    # (K) Lead-Lag Dòng tiền (Q3): Đột biến thanh khoản (flow_z60) dẫn dắt hay FOMO đu đỉnh?
+    wf = Window.partitionBy("sector_code").orderBy("date")
+    wf_prev60 = wf.rowsBetween(-60, -1)
+    wf_fwd20 = wf.rowsBetween(1, 20)
+    wf_fwd60 = wf.rowsBetween(1, 60)
+    flow_base = (
+        sector_daily.select("sector_code", "sector_name", "date", "sector_ret", "value_bn")
+        .withColumn("_lv", F.log1p("value_bn"))
+        .withColumn("_mu", F.avg("_lv").over(wf_prev60))
+        .withColumn("_sd", F.stddev("_lv").over(wf_prev60))
+        .withColumn("flow_z60", F.when(F.col("_sd") > 0, (F.col("_lv") - F.col("_mu")) / F.col("_sd")))
+        .withColumn("_lr", F.log1p(F.coalesce("sector_ret", F.lit(0.0))))
+        .withColumn("fwd_ret_20d", F.when(F.count("sector_ret").over(wf_fwd20) == 20,
+                                          F.exp(F.sum("_lr").over(wf_fwd20)) - 1))
+        .withColumn("fwd_ret_60d", F.when(F.count("sector_ret").over(wf_fwd60) == 60,
+                                          F.exp(F.sum("_lr").over(wf_fwd60)) - 1))
+        .filter(F.col("flow_z60").isNotNull() & F.col("fwd_ret_20d").isNotNull())
+        .withColumn("flow_quintile", F.ntile(5).over(Window.partitionBy("sector_code").orderBy("flow_z60")))
+    )
+    fl_sec = (
+        flow_base.groupBy("sector_code", "sector_name", "flow_quintile")
+        .agg(F.avg("flow_z60").alias("avg_flow_z60"),
+             F.avg("fwd_ret_20d").alias("avg_fwd_20d"),
+             F.avg("fwd_ret_60d").alias("avg_fwd_60d"),
+             F.avg(F.when(F.col("fwd_ret_20d") > 0, 1.0).otherwise(0.0)).alias("win_rate_20d"),
+             F.count("*").alias("n_obs"))
+    )
+    fl_all = (
+        flow_base.groupBy("flow_quintile")
+        .agg(F.avg("flow_z60").alias("avg_flow_z60"),
+             F.avg("fwd_ret_20d").alias("avg_fwd_20d"),
+             F.avg("fwd_ret_60d").alias("avg_fwd_60d"),
+             F.avg(F.when(F.col("fwd_ret_20d") > 0, 1.0).otherwise(0.0)).alias("win_rate_20d"),
+             F.count("*").alias("n_obs"))
+        .withColumn("sector_code", F.lit("ALL"))
+        .withColumn("sector_name", F.lit("Toàn thị trường (11 ngành)"))
+    )
+    gold["flow_lead_lag"] = fl_sec.unionByName(fl_all).orderBy("sector_code", "flow_quintile")
+
+    # (L) Rủi ro hệ thống (Absorption Ratio RMT) & Phân cụm chế độ thị trường bằng PySpark MLlib K-Means
+    systemic = build_systemic_and_ml_regime(spark, silver, market, sector_daily).cache()
+    gold["systemic_risk_daily"] = systemic
+    gold["ml_regime_sector"] = (
+        sector_daily.join(systemic.select("date", "ml_regime"), "date", "inner")
+        .filter(F.col("ml_regime").isNotNull() & F.col("sector_ret").isNotNull())
+        .groupBy("sector_code", "sector_name", "ml_regime")
+        .agg(F.count("sector_ret").alias("n_days"),
+             (F.avg("sector_ret") * td).alias("ann_mean_return"),
+             ((F.avg("sector_ret") - F.avg("mkt_ret")) * td).alias("ann_excess_vs_vnindex"),
+             (F.stddev_samp("sector_ret") * math.sqrt(td)).alias("ann_vol"),
+             F.avg(F.when(F.col("sector_ret") > 0, 1.0).otherwise(0.0)).alias("pct_up_days"))
+    )
+
     return gold
 
 
@@ -580,6 +830,7 @@ def main() -> int:
     # 6. Silver: Parquet phân vùng theo ngành, năm
     cols = ["date", "year", "month", "quarter", "ticker", "company_name", "exchange", "icb2_code",
             "sector_code", "sector_name", "open", "high", "low", "close", "volume", "traded_value_bn",
+            "amihud", "is_limit_hit", "avg_val_20d_lag", "above_ma50",
             "prev_close", "prev_date", "gap_days", "ret_1d", "ret_clean", "price_band",
             "is_band_breach", "is_abnormal_ret", "is_long_gap", "is_no_trade", "volume_missing", "volume_z60", "is_volume_spike",
             "wealth", "drawdown", "vol_20d", "trend_vs_ma200", "beta_250d", "excess_ret",

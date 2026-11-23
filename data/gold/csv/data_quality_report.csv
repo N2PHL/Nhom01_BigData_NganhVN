@@ -2,7 +2,7 @@
 DQ-01,Missing,Thiếu thời gian hoặc giá OHLC,0,196693,0.0,Loại bỏ dòng (không nội suy giá vì sẽ tạo giao dịch không có thật)
 DQ-02,Missing,Thiếu khối lượng,0,196693,0.0,Điền 0 và gắn cờ volume_missing
 DQ-03,Duplicate,"Trùng khóa (ticker, date)",84,196693,0.0427,Giữ bản lấy muộn nhất (row_number); 79 khóa có giá đóng cửa khác nhau giữa các bản
-DQ-04,Validity,Ngoài giai đoạn 2017-01-01..2026-11-22,0,196609,0.0,Lọc bỏ (filter)
+DQ-04,Validity,Ngoài giai đoạn 2017-01-01..2026-11-23,0,196609,0.0,Lọc bỏ (filter)
 DQ-05,Integration,Mã không khớp danh mục ngành (thừa / thiếu dữ liệu),0,81,0.0,Inner join với universe; thiếu dữ liệu: không có
 DQ-06,Validity,Giá <= 0 hoặc High < Low,0,196609,0.0,Loại bỏ dòng
 DQ-07,Consistency,"Open/Close nằm ngoài [Low, High]",93,196609,0.0473,"High = max(O,H,C), Low = min(O,L,C)"

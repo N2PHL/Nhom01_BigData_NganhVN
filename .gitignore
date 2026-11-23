@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 .Rhistory
 .DS_Store
+*.zip
 spark-warehouse/
 metastore_db/
 derby.log
